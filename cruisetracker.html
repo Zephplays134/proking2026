@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Ship Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // Connect to the free AISstream WebSocket
+        const socket = new WebSocket("wss://stream.aisstream.io/v0/stream");
+
+        socket.onopen = () => {
+            // Subscribe to a specific area (e.g., around a port)
+            socket.send(JSON.stringify({
+                Apikey: "35ed3a58f9a52cd38ffbc20c4f102a66a92ab63e
+",
+                BoundingBoxes: [[[-90, -180], [90, 180]]]
+            }));
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.MessageType === "PositionReport") {
+                const { Latitude, Longitude, ShipName } = data.Message.PositionReport;
+                L.marker([Latitude, Longitude]).addTo(map).bindPopup(ShipName || "Unknown Ship");
+            }
+        };
+    </script>
+</body>
+</html>
