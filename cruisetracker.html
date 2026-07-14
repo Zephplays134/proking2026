@@ -4,34 +4,96 @@
     <title>Live Ship Tracker</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { height: 100vh; }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1000;
+            font-size: 14px;
+        }
+        .status-connected { color: green; }
+        .status-disconnected { color: red; }
+        .status-loading { color: orange; }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <div id="status" class="status-loading">Connecting...</div>
+    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         const map = L.map('map').setView([20, 0], 2);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const statusDiv = document.getElementById('status');
+        const shipMarkers = {}; // Store markers by MMSI to update instead of duplicate
 
         // Connect to the free AISstream WebSocket
         const socket = new WebSocket("wss://stream.aisstream.io/v0/stream");
 
         socket.onopen = () => {
-            // Subscribe to a specific area (e.g., around a port)
+            console.log("WebSocket connected");
+            statusDiv.className = 'status-loading';
+            statusDiv.textContent = 'Subscribing to ship data...';
+            
+            // Subscribe to global area to track all ships
             socket.send(JSON.stringify({
-                Apikey: "35ed3a58f9a52cd38ffbc20c4f102a66a92ab63e
-",
+                Apikey: "35ed3a58f9a52cd38ffbc20c4f102a66a92ab63e",
                 BoundingBoxes: [[[-90, -180], [90, 180]]]
             }));
         };
 
         socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.MessageType === "PositionReport") {
-                const { Latitude, Longitude, ShipName } = data.Message.PositionReport;
-                L.marker([Latitude, Longitude]).addTo(map).bindPopup(ShipName || "Unknown Ship");
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.MessageType === "PositionReport") {
+                    const posReport = data.Message.PositionReport;
+                    const mmsi = data.Message.UserID;
+                    const { Latitude, Longitude } = posReport;
+                    const shipName = data.Message.ShipName?.trim() || `Ship ${mmsi}`;
+                    
+                    if (Latitude && Longitude) {
+                        if (shipMarkers[mmsi]) {
+                            // Update existing marker
+                            shipMarkers[mmsi].setLatLng([Latitude, Longitude]);
+                            shipMarkers[mmsi].setPopupContent(shipName);
+                        } else {
+                            // Create new marker
+                            const marker = L.marker([Latitude, Longitude])
+                                .addTo(map)
+                                .bindPopup(shipName);
+                            shipMarkers[mmsi] = marker;
+                        }
+                        
+                        // Update status
+                        statusDiv.className = 'status-connected';
+                        statusDiv.textContent = `Connected • Ships tracked: ${Object.keys(shipMarkers).length}`;
+                    }
+                }
+            } catch (error) {
+                console.error("Error processing message:", error);
             }
+        };
+
+        socket.onerror = (error) => {
+            console.error("WebSocket error:", error);
+            statusDiv.className = 'status-disconnected';
+            statusDiv.textContent = 'Connection error. Check console.';
+        };
+
+        socket.onclose = () => {
+            console.log("WebSocket disconnected");
+            statusDiv.className = 'status-disconnected';
+            statusDiv.textContent = 'Disconnected. Refresh to reconnect.';
         };
     </script>
 </body>
